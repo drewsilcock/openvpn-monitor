@@ -45,6 +45,7 @@ except ImportError:
     geoip2_available = False
 
 import argparse
+import json
 import os
 import re
 import socket
@@ -937,6 +938,84 @@ def monitor_wsgi():
     @app.route('/<filename:re:.*\.(jpg|png)>', method='GET')
     def get_images(filename):
         return static_file(filename, image_dir)
+
+    @app.route('/api', method='GET')
+    def api_root():
+        response.content_type = 'application/json'
+        return '{"health": "ok"}'
+
+    @app.route('/api/vpns', method='GET')
+    def api_get_vpns():
+        global wsgi_output
+        wsgi_output = ''
+
+        cfg = ConfigLoader(args.config)
+        monitor = OpenvpnMgmtInterface(cfg)
+
+        vpns = monitor.vpns.copy()
+        for vpn in vpns.values():
+            del vpn["password"]
+
+        output(json.dumps(vpns, default=str))
+
+        response.content_type = 'application/json'
+        return wsgi_output
+
+    @app.route('/api/vpns/<vpn_id>', method='GET')
+    def api_get_vpn_by_id(vpn_id):
+        global wsgi_output
+        wsgi_output = ''
+
+        cfg = ConfigLoader(args.config)
+        monitor = OpenvpnMgmtInterface(cfg)
+
+        try:
+            vpn = monitor.vpns[vpn_id]
+            del vpn["password"]
+            output(json.dumps(vpn, default=str))
+        except KeyError:
+            response.status = 404
+            output(f'{{"error": "VPN \'{vpn_id}\' not found"}}')
+
+        response.content_type = 'application/json'
+        return wsgi_output
+
+    @app.route('/api/vpns/<vpn_id>/clients', method='GET')
+    def api_get_vpn_clients(vpn_id):
+        global wsgi_output
+        wsgi_output = ''
+
+        cfg = ConfigLoader(args.config)
+        monitor = OpenvpnMgmtInterface(cfg)
+
+        try:
+            vpn = monitor.vpns[vpn_id]
+            output(json.dumps(vpn['sessions'], default=str))
+        except KeyError:
+            response.status = 404
+            output(f'{{"error": "VPN \'{vpn_id}\' not found"}}')
+
+        response.content_type = 'application/json'
+        return wsgi_output
+
+    @app.route('/api/vpns/<vpn_id>/clients/<client_cn>', method='GET')
+    def api_get_vpn_client_by_id(vpn_id, client_cn):
+        global wsgi_output
+        wsgi_output = ''
+
+        cfg = ConfigLoader(args.config)
+        monitor = OpenvpnMgmtInterface(cfg)
+
+        try:
+            vpn = monitor.vpns[vpn_id]
+            client = next(session for session in vpn['sessions'].values() if session["username"] == client_cn)
+            output(json.dumps(client, default=str))
+        except (KeyError, StopIteration):
+            response.status = 404
+            output(f'{{"error": "client \'{client_cn}\' or VPN \'{vpn_id}\' not found"}}')
+
+        response.content_type = 'application/json'
+        return wsgi_output
 
     return app
 
